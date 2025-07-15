@@ -128,12 +128,17 @@ if st.button("Generar planificación"):
         sesiones_por_unidad[i] += 1
 
     # Procesamiento spaCy (opcional)
-    try:
-        import spacy
-        nlp = spacy.load("es_core_news_sm")
-    except Exception as e:
-        st.warning("spaCy no está instalado (solo usará 'el contenido' como concepto): " + str(e))
-        nlp = None
+   try:
+    import spacy
+    nlp = spacy.load("es_core_news_sm")
+except OSError:
+    # Si no existe, lo descarga por primera vez automáticamente (funciona en Streamlit Cloud)
+    from spacy.cli import download
+    download("es_core_news_sm")
+    nlp = spacy.load("es_core_news_sm")
+except Exception:
+    nlp = None
+
 
     fragmentos_sesiones = []
     niveles = list(verbos_bloom.keys())
