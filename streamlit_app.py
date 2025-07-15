@@ -136,9 +136,9 @@ try:
         from spacy.cli import download
         download("es_core_news_sm")
         nlp = spacy.load("es_core_news_sm")
- except Exception as e:
-     st.warning("spaCy no está instalado (solo usará 'el contenido' como concepto): " + str(e))
-     nlp = None
+    except Exception as e:
+        st.warning("spaCy no está instalado (solo usará 'el contenido' como concepto): " + str(e))
+        nlp = None
 
 
 
