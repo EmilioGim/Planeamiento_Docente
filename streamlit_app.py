@@ -1,20 +1,44 @@
 import nltk
+import ssl
 
 def download_nltk_resources():
-    recursos = ['punkt', 'averaged_perceptron_tagger', 'wordnet']
+    """Descarga todos los recursos NLTK necesarios para TextBlob"""
+    try:
+        _create_unverified_https_context = ssl._create_unverified_context
+    except AttributeError:
+        pass
+    else:
+        ssl._create_default_https_context = _create_unverified_https_context
+    
+    # Lista completa de recursos necesarios para TextBlob
+    recursos = [
+        'punkt',
+        'averaged_perceptron_tagger', 
+        'wordnet',
+        'brown',
+        'conll2000',
+        'movie_reviews'
+    ]
+    
     for recurso in recursos:
         try:
+            # Intentar encontrar el recurso
             if recurso == 'punkt':
                 nltk.data.find('tokenizers/punkt')
             elif recurso == 'averaged_perceptron_tagger':
                 nltk.data.find('taggers/averaged_perceptron_tagger')
-            else:
+            elif recurso in ['wordnet']:
+                nltk.data.find(f'corpora/{recurso}')
+            elif recurso in ['brown', 'conll2000', 'movie_reviews']:
                 nltk.data.find(f'corpora/{recurso}')
         except LookupError:
-            nltk.download(recurso)
+            print(f"Descargando {recurso}...")
+            nltk.download(recurso, quiet=True)
+    
+    print("Todos los recursos NLTK han sido descargados exitosamente.")
 
+# Descargar recursos antes de importar TextBlob
 download_nltk_resources()
-
 
 import streamlit as st
 import random
@@ -22,10 +46,17 @@ import re
 from datetime import datetime, timedelta, date
 from io import BytesIO
 
+# Importar TextBlob después de descargar los recursos
 from textblob import TextBlob
-
-
 from docx import Document
+
+# Intentar importar DocxTemplate, si no está disponible, mostrar mensaje
+try:
+    from docxtpl import DocxTemplate
+    DOCXTPL_AVAILABLE = True
+except ImportError:
+    DOCXTPL_AVAILABLE = False
+    st.error("Para usar las plantillas Word, instale python-docx-template: pip install python-docx-template")
 
 # Diccionarios Bloom y plantillas
 verbos_bloom = {
@@ -68,9 +99,16 @@ retro = ["Recordatorio de clase anterior", "Juego de revisión", "Preguntas oral
 dias_semana = {"lunes": 0, "martes": 1, "miércoles": 2, "jueves": 3, "viernes": 4, "sábado": 5}
 
 def extraer_conceptos_textblob(texto):
-    blob = TextBlob(texto)
-    conceptos = list(blob.noun_phrases)
-    return conceptos
+    """Extrae conceptos usando TextBlob con manejo de errores"""
+    try:
+        blob = TextBlob(texto)
+        conceptos = list(blob.noun_phrases)
+        return conceptos
+    except Exception as e:
+        st.warning(f"Error al extraer conceptos con TextBlob: {e}")
+        # Fallback: extraer palabras simples como conceptos
+        palabras = texto.split()
+        return [palabra for palabra in palabras if len(palabra) > 3][:5]
 
 def extraer_texto_docx(archivo_docx):
     doc = Document(archivo_docx)
@@ -218,202 +256,222 @@ def main():
 
     st.markdown("---")
     st.markdown("## Plantillas Word (.docx)")
-    plantilla_planeamiento = st.file_uploader("Plantilla Planeamiento (.docx)", type=["docx"])
-    plantilla_cronograma = st.file_uploader("Plantilla Cronograma (.docx)", type=["docx"])
+    
+    if DOCXTPL_AVAILABLE:
+        plantilla_planeamiento = st.file_uploader("Plantilla Planeamiento (.docx)", type=["docx"])
+        plantilla_cronograma = st.file_uploader("Plantilla Cronograma (.docx)", type=["docx"])
+    else:
+        st.warning("Las plantillas Word no están disponibles. Instale python-docx-template para habilitar esta funcionalidad.")
+        plantilla_planeamiento = None
+        plantilla_cronograma = None
 
     st.markdown("---")
     generar = st.button("🚀 Generar planificación", use_container_width=True)
     if generar:
-        unidades = genera_dict_unidades(unidades_input)
-        clases_normales = 10
+        with st.spinner("Generando planificación..."):
+            unidades = genera_dict_unidades(unidades_input)
+            clases_normales = 10
 
-        fechas_prueba = []
-        for pr, label in zip([prueba1, prueba2], ["Prueba 1", "Prueba 2"]):
-            if pr not in fechas_sesiones:
-                st.error(f"La fecha de {label} debe ser uno de los días de clase. Ajuste la fecha.")
-                return
-            else:
-                fechas_prueba.append(pr)
-        fecha_final_ = fechas_sesiones[-1]
-
-        sesiones = ["Clase normal"] * total_sesiones
-        idx_prueba = [fechas_sesiones.index(f) for f in fechas_prueba]
-        sesiones[-1] = "Examen final"
-        for i, idx in enumerate(idx_prueba):
-            sesiones[idx-1] = "Retroalimentación"
-            sesiones[idx] = "Prueba parcial"
-            sesiones[idx+1] = "Revisión de prueba"
-
-        sesiones_normales_idx = [i for i, tipo in enumerate(sesiones) if tipo == "Clase normal"]
-        sesiones_unidades = distribuir_unidades_10_ordenado(unidades)
-
-        fragmentos_sesiones = []
-        niveles = list(verbos_bloom.keys())
-        nivel_idx = 0
-        for lista_unidades in sesiones_unidades:
-            contenido_total = []
-            titulos = []
-            for unidad in lista_unidades:
-                titulos.append(unidad["titulo"])
-                contenido_total += unidad["lineas"]
-            fragmento = " ".join(contenido_total)
-            conceptos = extraer_conceptos_textblob(fragmento)
-            concepto = ", ".join(conceptos) if conceptos else fragmento.strip()
-            nivel = niveles[nivel_idx % len(niveles)]
-            verbo = random.choice(verbos_bloom[nivel])
-            actividad = plantillas_actividades[nivel].format(concepto)
-            fragmentos_sesiones.append({
-                "Unidad": " / ".join(titulos),
-                "Contenido": fragmento,
-                "Concepto": concepto,
-                "Nivel": nivel,
-                "Verbo": verbo,
-                "Actividad": actividad,
-                "Recursos": ", ".join(recursos_bloom[nivel]),
-                "Evaluacion": ", ".join(evaluacion_bloom[nivel])
-            })
-            nivel_idx += 1
-
-        # Generación de lista de sesiones para visualización y Word
-        lista_sesiones_word = []
-        idx_normal = 0
-        for idx, (tipo, fecha) in enumerate(zip(sesiones, fechas_sesiones)):
-            sesion_dict = {
-                "Numero": idx+1,
-                "Fecha": fecha.strftime("%d/%m/%Y"),
-                "Evento": tipo,
-                "En_feriado": fecha in feriados_list,
-                "Planificacion": None
-            }
-            if tipo == "Clase normal":
-                if idx_normal < len(fragmentos_sesiones):
-                    p = fragmentos_sesiones[idx_normal]
-                    sesion_dict["Planificacion"] = {
-                        "Unidad": p["Unidad"],
-                        "Contenido": p["Contenido"],
-                        "Verbo": p["Verbo"],
-                        "Concepto": p["Concepto"],
-                        "Nivel": p["Nivel"],
-                        "Actividad": p["Actividad"],
-                        "Recursos": p["Recursos"],
-                        "Evaluacion": p["Evaluacion"],
-                        "Retroalimentacion": random.choice(retro),
-                        "Introduccion": random.choice(intro),
-                        "Inicio": random.choice(inicio),
-                        "Cierre": random.choice(cierre)
-                    }
+            fechas_prueba = []
+            for pr, label in zip([prueba1, prueba2], ["Prueba 1", "Prueba 2"]):
+                if pr not in fechas_sesiones:
+                    st.error(f"La fecha de {label} debe ser uno de los días de clase. Ajuste la fecha.")
+                    return
                 else:
-                    sesion_dict["Planificacion"] = {
-                        "Unidad": "",
-                        "Contenido": "",
-                        "Verbo": "",
-                        "Concepto": "",
-                        "Nivel": "",
-                        "Actividad": "",
-                        "Recursos": "",
-                        "Evaluacion": "",
-                        "Retroalimentacion": "",
-                        "Introduccion": "",
-                        "Inicio": "",
-                        "Cierre": ""
-                    }
-                idx_normal += 1
-            lista_sesiones_word.append(sesion_dict)
+                    fechas_prueba.append(pr)
+            fecha_final_ = fechas_sesiones[-1]
 
-        # CONTEXTO PARA WORD
-        context = {
-            "PERIODO": f"{fecha_inicio.strftime('%d/%m/%Y')} al {fecha_fin.strftime('%d/%m/%Y')}",
-            "DIA_CLASE": dia_clase.capitalize(),
-            "FERIADOS": ', '.join([f.strftime('%d/%m/%Y') for f in feriados_list]) if feriados_list else "",
-            "PRUEBAS": ', '.join([f.strftime('%d/%m/%Y') for f in fechas_prueba]),
-            "EXAMEN_FINAL": fecha_final_.strftime('%d/%m/%Y'),
-            "UNIDADES": [u["titulo"] for u in unidades],
-        }
-        for sesion in lista_sesiones_word:
-            pref = f"SESION_{sesion['Numero']}_"
-            context[pref + "FECHA"] = sesion['Fecha']
-            context[pref + "EVENTO"] = sesion['Evento']
-            context[pref + "ADVERTENCIA"] = "⚠️ ¡Advertencia! Esta sesión coincide con un feriado." if sesion["En_feriado"] else ""
-            planif = sesion.get("Planificacion")
-            if planif:
-                context[pref + "UNIDAD"] = f"🟢 UNIDAD : {planif['Unidad']}"
-                context[pref + "CONTENIDO"] = f"📄 CONTENIDO: {planif['Contenido']}"
-                context[pref + "OBJETIVO"] = f"🎯 OBJETIVO: El estudiante será capaz de {planif['Verbo']} {planif['Concepto']}"
-                context[pref + "NIVEL_BLOOM"] = f"Nivel Bloom: {planif['Nivel']}"
-                context[pref + "ESTRATEGIAS"] = f"Estrategias de aprendizaje: {planif['Actividad']}"
-                context[pref + "RETROALIMENTACION"] = f"Retroalimentación: {planif['Retroalimentacion']}"
-                context[pref + "INTRODUCCION"] = f"Introducción: {planif['Introduccion']}"
-                context[pref + "INICIO"] = f"Inicio: {planif['Inicio']}"
-                context[pref + "DESARROLLO"] = f"Desarrollo: {planif['Actividad']}"
-                context[pref + "CIERRE"] = f"Cierre: {planif['Cierre']}"
-                context[pref + "RECURSOS"] = f"Recursos: {planif['Recursos']}"
-                context[pref + "EVALUACION"] = f"Evaluación: {planif['Evaluacion']}"
-            else:
-                for campo in ["UNIDAD","CONTENIDO","OBJETIVO","NIVEL_BLOOM","ESTRATEGIAS","RETROALIMENTACION","INTRODUCCION","INICIO",
-                            "DESARROLLO","CIERRE","RECURSOS","EVALUACION"]:
-                    context[pref + campo] = ""
+            sesiones = ["Clase normal"] * total_sesiones
+            idx_prueba = [fechas_sesiones.index(f) for f in fechas_prueba]
+            sesiones[-1] = "Examen final"
+            for i, idx in enumerate(idx_prueba):
+                sesiones[idx-1] = "Retroalimentación"
+                sesiones[idx] = "Prueba parcial"
+                sesiones[idx+1] = "Revisión de prueba"
 
-        # Salida visual igual que antes, pero con títulos
-        out = "\n📋 PLANIFICACIÓN SEMESTRAL\n"
-        out += "=" * 90 + "\n"
-        out += f"PERÍODO: {fecha_inicio.strftime('%d/%m/%Y')} al {fecha_fin.strftime('%d/%m/%Y')}\n"
-        out += f"DÍA DE CLASE: {dia_clase.capitalize()}\n"
-        if feriados_list: out += f"FERIADOS: {', '.join([f.strftime('%d/%m/%Y') for f in feriados_list])}\n"
-        out += f"PRUEBAS: {', '.join([f.strftime('%d/%m/%Y') for f in fechas_prueba])}\n"
-        out += f"EXAMEN FINAL: {fecha_final_.strftime('%d/%m/%Y')}\n"
-        out += "\n" + "-" * 90 + "\n"
-        out += "UNIDADES PROGRAMADAS:\n"
-        for i, unidad in enumerate(unidades, 1):
-            out += f"{i}. {unidad['titulo']}\n"
-            for contenido in unidad['lineas']:
-                out += f"   - {contenido}\n"
-            out += "\n"
-        out += "=" * 90 + "\n"
-        out += "\n📅 SESIONES DEL SEMESTRE:\n"
+            sesiones_normales_idx = [i for i, tipo in enumerate(sesiones) if tipo == "Clase normal"]
+            sesiones_unidades = distribuir_unidades_10_ordenado(unidades)
 
-        for sesion in lista_sesiones_word:
-            out += f"\n🔵 SESIÓN {sesion['Numero']:02d} | {sesion['Fecha']} | {sesion['Evento']}\n"
-            out += "-" * 60 + "\n"
-            if sesion["Evento"] == "Clase normal" and sesion["Planificacion"]:
-                p = sesion["Planificacion"]
-                out += f"UNIDAD : {p['Unidad']}\n"
-                out += f"CONTENIDO: {p['Contenido']}\n"
-                out += f"OBJETIVO: El estudiante será capaz de {p['Verbo']} {p['Concepto']}\n"
-                out += f"Nivel Bloom: {p['Nivel']}\n"
-                out += f"Estrategias de aprendizaje: {p['Actividad']}\n"
-                out += f"Retroalimentación: {p['Retroalimentacion']}\n"
-                out += f"Introducción: {p['Introduccion']}\n"
-                out += f"Inicio: {p['Inicio']}\n"
-                out += f"Desarrollo: {p['Actividad']}\n"
-                out += f"Cierre: {p['Cierre']}\n"
-                out += f"Recursos: {p['Recursos']}\n"
-                out += f"Evaluación: {p['Evaluacion']}\n"
-            if sesion["En_feriado"]:
-                out += " ⚠️ ¡Advertencia! Esta sesión coincide con un feriado. Reagendar si es necesario.\n"
-            out += "-" * 60 + "\n"
+            fragmentos_sesiones = []
+            niveles = list(verbos_bloom.keys())
+            nivel_idx = 0
+            for lista_unidades in sesiones_unidades:
+                contenido_total = []
+                titulos = []
+                for unidad in lista_unidades:
+                    titulos.append(unidad["titulo"])
+                    contenido_total += unidad["lineas"]
+                fragmento = " ".join(contenido_total)
+                conceptos = extraer_conceptos_textblob(fragmento)
+                concepto = ", ".join(conceptos) if conceptos else fragmento.strip()
+                nivel = niveles[nivel_idx % len(niveles)]
+                verbo = random.choice(verbos_bloom[nivel])
+                actividad = plantillas_actividades[nivel].format(concepto)
+                fragmentos_sesiones.append({
+                    "Unidad": " / ".join(titulos),
+                    "Contenido": fragmento,
+                    "Concepto": concepto,
+                    "Nivel": nivel,
+                    "Verbo": verbo,
+                    "Actividad": actividad,
+                    "Recursos": ", ".join(recursos_bloom[nivel]),
+                    "Evaluacion": ", ".join(evaluacion_bloom[nivel])
+                })
+                nivel_idx += 1
+
+            # Generación de lista de sesiones para visualización y Word
+            lista_sesiones_word = []
+            idx_normal = 0
+            for idx, (tipo, fecha) in enumerate(zip(sesiones, fechas_sesiones)):
+                sesion_dict = {
+                    "Numero": idx+1,
+                    "Fecha": fecha.strftime("%d/%m/%Y"),
+                    "Evento": tipo,
+                    "En_feriado": fecha in feriados_list,
+                    "Planificacion": None
+                }
+                if tipo == "Clase normal":
+                    if idx_normal < len(fragmentos_sesiones):
+                        p = fragmentos_sesiones[idx_normal]
+                        sesion_dict["Planificacion"] = {
+                            "Unidad": p["Unidad"],
+                            "Contenido": p["Contenido"],
+                            "Verbo": p["Verbo"],
+                            "Concepto": p["Concepto"],
+                            "Nivel": p["Nivel"],
+                            "Actividad": p["Actividad"],
+                            "Recursos": p["Recursos"],
+                            "Evaluacion": p["Evaluacion"],
+                            "Retroalimentacion": random.choice(retro),
+                            "Introduccion": random.choice(intro),
+                            "Inicio": random.choice(inicio),
+                            "Cierre": random.choice(cierre)
+                        }
+                    else:
+                        sesion_dict["Planificacion"] = {
+                            "Unidad": "",
+                            "Contenido": "",
+                            "Verbo": "",
+                            "Concepto": "",
+                            "Nivel": "",
+                            "Actividad": "",
+                            "Recursos": "",
+                            "Evaluacion": "",
+                            "Retroalimentacion": "",
+                            "Introduccion": "",
+                            "Inicio": "",
+                            "Cierre": ""
+                        }
+                    idx_normal += 1
+                lista_sesiones_word.append(sesion_dict)
+
+            # CONTEXTO PARA WORD
+            context = {
+                "PERIODO": f"{fecha_inicio.strftime('%d/%m/%Y')} al {fecha_fin.strftime('%d/%m/%Y')}",
+                "DIA_CLASE": dia_clase.capitalize(),
+                "FERIADOS": ', '.join([f.strftime('%d/%m/%Y') for f in feriados_list]) if feriados_list else "",
+                "PRUEBAS": ', '.join([f.strftime('%d/%m/%Y') for f in fechas_prueba]),
+                "EXAMEN_FINAL": fecha_final_.strftime('%d/%m/%Y'),
+                "UNIDADES": [u["titulo"] for u in unidades],
+            }
+            for sesion in lista_sesiones_word:
+                pref = f"SESION_{sesion['Numero']}_"
+                context[pref + "FECHA"] = sesion['Fecha']
+                context[pref + "EVENTO"] = sesion['Evento']
+                context[pref + "ADVERTENCIA"] = "⚠️ ¡Advertencia! Esta sesión coincide con un feriado." if sesion["En_feriado"] else ""
+                planif = sesion.get("Planificacion")
+                if planif:
+                    context[pref + "UNIDAD"] = f"🟢 UNIDAD : {planif['Unidad']}"
+                    context[pref + "CONTENIDO"] = f"📄 CONTENIDO: {planif['Contenido']}"
+                    context[pref + "OBJETIVO"] = f"🎯 OBJETIVO: El estudiante será capaz de {planif['Verbo']} {planif['Concepto']}"
+                    context[pref + "NIVEL_BLOOM"] = f"Nivel Bloom: {planif['Nivel']}"
+                    context[pref + "ESTRATEGIAS"] = f"Estrategias de aprendizaje: {planif['Actividad']}"
+                    context[pref + "RETROALIMENTACION"] = f"Retroalimentación: {planif['Retroalimentacion']}"
+                    context[pref + "INTRODUCCION"] = f"Introducción: {planif['Introduccion']}"
+                    context[pref + "INICIO"] = f"Inicio: {planif['Inicio']}"
+                    context[pref + "DESARROLLO"] = f"Desarrollo: {planif['Actividad']}"
+                    context[pref + "CIERRE"] = f"Cierre: {planif['Cierre']}"
+                    context[pref + "RECURSOS"] = f"Recursos: {planif['Recursos']}"
+                    context[pref + "EVALUACION"] = f"Evaluación: {planif['Evaluacion']}"
+                else:
+                    for campo in ["UNIDAD","CONTENIDO","OBJETIVO","NIVEL_BLOOM","ESTRATEGIAS","RETROALIMENTACION","INTRODUCCION","INICIO",
+                                "DESARROLLO","CIERRE","RECURSOS","EVALUACION"]:
+                        context[pref + campo] = ""
+
+            # Salida visual igual que antes, pero con títulos
+            out = "\n📋 PLANIFICACIÓN SEMESTRAL\n"
+            out += "=" * 90 + "\n"
+            out += f"PERÍODO: {fecha_inicio.strftime('%d/%m/%Y')} al {fecha_fin.strftime('%d/%m/%Y')}\n"
+            out += f"DÍA DE CLASE: {dia_clase.capitalize()}\n"
+            if feriados_list: out += f"FERIADOS: {', '.join([f.strftime('%d/%m/%Y') for f in feriados_list])}\n"
+            out += f"PRUEBAS: {', '.join([f.strftime('%d/%m/%Y') for f in fechas_prueba])}\n"
+            out += f"EXAMEN FINAL: {fecha_final_.strftime('%d/%m/%Y')}\n"
+            out += "\n" + "-" * 90 + "\n"
+            out += "UNIDADES PROGRAMADAS:\n"
+            for i, unidad in enumerate(unidades, 1):
+                out += f"{i}. {unidad['titulo']}\n"
+                for contenido in unidad['lineas']:
+                    out += f"   - {contenido}\n"
+                out += "\n"
+            out += "=" * 90 + "\n"
+            out += "\n📅 SESIONES DEL SEMESTRE:\n"
+
+            for sesion in lista_sesiones_word:
+                out += f"\n🔵 SESIÓN {sesion['Numero']:02d} | {sesion['Fecha']} | {sesion['Evento']}\n"
+                out += "-" * 60 + "\n"
+                if sesion["Evento"] == "Clase normal" and sesion["Planificacion"]:
+                    p = sesion["Planificacion"]
+                    out += f"UNIDAD : {p['Unidad']}\n"
+                    out += f"CONTENIDO: {p['Contenido']}\n"
+                    out += f"OBJETIVO: El estudiante será capaz de {p['Verbo']} {p['Concepto']}\n"
+                    out += f"Nivel Bloom: {p['Nivel']}\n"
+                    out += f"Estrategias de aprendizaje: {p['Actividad']}\n"
+                    out += f"Retroalimentación: {p['Retroalimentacion']}\n"
+                    out += f"Introducción: {p['Introduccion']}\n"
+                    out += f"Inicio: {p['Inicio']}\n"
+                    out += f"Desarrollo: {p['Actividad']}\n"
+                    out += f"Cierre: {p['Cierre']}\n"
+                    out += f"Recursos: {p['Recursos']}\n"
+                    out += f"Evaluación: {p['Evaluacion']}\n"
+                if sesion["En_feriado"]:
+                    out += " ⚠️ ¡Advertencia! Esta sesión coincide con un feriado. Reagendar si es necesario.\n"
+                out += "-" * 60 + "\n"
 
         st.success("¡Planificación generada! Consulta el informe y descarga los archivos abajo.")
         st.markdown("### Informe generado")
         st.text_area("Resumen", out, height=500)
 
-        if plantilla_planeamiento is not None:
-            doc_planeamiento = DocxTemplate(BytesIO(plantilla_planeamiento.read()))
-            doc_planeamiento.render(context)
-            buffer_planeamiento = BytesIO()
-            doc_planeamiento.save(buffer_planeamiento)
-            st.download_button("Descargar Planeamiento Word", buffer_planeamiento.getvalue(), file_name="Planeamiento.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        # Botones de descarga
+        col1, col2, col3 = st.columns(3)
+        
+        with col3:
+            buffer_txt = BytesIO()
+            buffer_txt.write(out.encode("utf-8"))
+            buffer_txt.seek(0)
+            st.download_button("📄 Descargar Resumen TXT", buffer_txt.getvalue(), file_name="Planificacion.txt", mime="text/plain")
 
-        if plantilla_cronograma is not None:
-            doc_cronograma = DocxTemplate(BytesIO(plantilla_cronograma.read()))
-            doc_cronograma.render(context)
-            buffer_cronograma = BytesIO()
-            doc_cronograma.save(buffer_cronograma)
-            st.download_button("Descargar Cronograma Word", buffer_cronograma.getvalue(), file_name="Cronograma.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        if DOCXTPL_AVAILABLE:
+            with col1:
+                if plantilla_planeamiento is not None:
+                    try:
+                        doc_planeamiento = DocxTemplate(BytesIO(plantilla_planeamiento.read()))
+                        doc_planeamiento.render(context)
+                        buffer_planeamiento = BytesIO()
+                        doc_planeamiento.save(buffer_planeamiento)
+                        st.download_button("📝 Descargar Planeamiento Word", buffer_planeamiento.getvalue(), file_name="Planeamiento.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+                    except Exception as e:
+                        st.error(f"Error al generar plantilla de planeamiento: {e}")
 
-        buffer_txt = BytesIO()
-        buffer_txt.write(out.encode("utf-8"))
-        buffer_txt.seek(0)
-        st.download_button("Descargar Resumen TXT", buffer_txt.getvalue(), file_name="Planificacion.txt", mime="text/plain")
+            with col2:
+                if plantilla_cronograma is not None:
+                    try:
+                        doc_cronograma = DocxTemplate(BytesIO(plantilla_cronograma.read()))
+                        doc_cronograma.render(context)
+                        buffer_cronograma = BytesIO()
+                        doc_cronograma.save(buffer_cronograma)
+                        st.download_button("📅 Descargar Cronograma Word", buffer_cronograma.getvalue(), file_name="Cronograma.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+                    except Exception as e:
+                        st.error(f"Error al generar plantilla de cronograma: {e}")
 
 if __name__ == "__main__":
     main()
