@@ -471,14 +471,16 @@ if st.button("🚀 Generar Planificación", key="generate_plan_btn"):
                 unidades = genera_dict_unidades(unidades_input)
                 total_sesiones = 17
                 dia_clase_num = dias_semana[dia_clase]
+                # ----- MODIFICACIÓN: No omitir feriados -----
                 fechas_sesiones = []
                 f = fecha_inicio
                 while len(fechas_sesiones) < total_sesiones:
-                    if f.weekday() == dia_clase_num and f not in st.session_state.feriados_list:
+                    if f.weekday() == dia_clase_num:
                         fechas_sesiones.append(f)
                         f += timedelta(days=7)
                     else:
                         f += timedelta(days=1)
+                # --------------------------------------------
                 for i, pr in enumerate(fechas_prueba):
                     if pr not in fechas_sesiones:
                         st.warning(f"La fecha de Prueba {i+1} ({pr.strftime('%d/%m/%Y')}) no es un día de clase válido o coincide con un feriado.")
