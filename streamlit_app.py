@@ -7,15 +7,12 @@ import io
 import base64
 
 # Instalación y manejo de docxtpl para Streamlit (debe estar instalado en el entorno)
-# Streamlit no maneja instalaciones automáticas como subprocess.run
-# Asegúrate de que 'python-docx-template' esté en tu requirements.txt para despliegue.
 try:
     from docxtpl import DocxTemplate
 except ImportError:
     st.error("La librería 'python-docx-template' no está instalada. Por favor, instálala usando: pip install python-docx-template")
     st.stop()
 
-# --- Datos de configuración (Mantienen la lógica original) ---
 verbos_bloom = {
     "Recordar": ["identificar", "definir", "listar"],
     "Comprender": ["explicar", "resumir", "interpretar"],
@@ -59,16 +56,9 @@ intro = ["Lectura disparadora", "Situación problema", "Contextualización narra
 retro = ["Recordatorio de clase anterior", "Juego de revisión", "Preguntas orales"]
 dias_semana = {"lunes": 0, "martes": 1, "miércoles": 2, "jueves": 3, "viernes": 4, "sábado": 5}
 
-# --- Funciones de procesamiento de lógica (Mantienen la lógica original) ---
-
 def extraer_conceptos_simple(texto):
-    """
-    Extrae conceptos usando regex y procesamiento básico de texto.
-    Reemplaza a spaCy para facilitar la creación del ejecutable.
-    """
     texto = texto.lower()
     texto = re.sub(r'[^\w\s]', ' ', texto)
-
     stop_words = {
         'el', 'la', 'de', 'que', 'y', 'a', 'en', 'un', 'es', 'se', 'no', 'te', 'lo', 'le',
         'da', 'su', 'por', 'son', 'con', 'para', 'al', 'una', 'ser', 'las', 'del', 'los',
@@ -76,6 +66,11 @@ def extraer_conceptos_simple(texto):
         'este', 'esta', 'están', 'puede', 'nos', 'todo', 'tiene', 'fue', 'entre', 'cuando',
         'hasta', 'desde', 'hacer', 'cada', 'porque', 'sobre', 'otros', 'tanto', 'tiempo',
         'donde', 'mismo', 'ahora', 'después', 'vida', 'también', 'sin', 'años', 'estado'
+    }
+    palabras_no_concepto = {
+        "desarrollo", "semana", "proceso", "unidad", "etapa", "día",
+        "generalidades", "introducción", "serie", "series", "forward", "fourier",
+        "tema", "concepto", "parte", "presentación", "fundamentos", "aspectos"
     }
 
     palabras = texto.split()
@@ -87,27 +82,30 @@ def extraer_conceptos_simple(texto):
     conceptos = []
     for i in range(len(palabras_filtradas) - 1):
         bigrama = f"{palabras_filtradas[i]} {palabras_filtradas[i+1]}"
-        conceptos.append(bigrama)
+        if palabras_filtradas[i] != palabras_filtradas[i+1] and not any(w in palabras_no_concepto for w in bigrama.split()):
+            conceptos.append(bigrama)
 
     for i in range(len(palabras_filtradas) - 2):
         trigrama = f"{palabras_filtradas[i]} {palabras_filtradas[i+1]} {palabras_filtradas[i+2]}"
-        conceptos.append(trigrama)
+        if len(set([palabras_filtradas[i], palabras_filtradas[i+1], palabras_filtradas[i+2]])) > 1 and not any(w in palabras_no_concepto for w in trigrama.split()):
+            conceptos.append(trigrama)
 
-    conceptos.extend(palabras_filtradas)
+    conceptos.extend([
+        palabra for palabra in palabras_filtradas 
+        if palabra not in palabras_no_concepto
+    ])
     contador = Counter(conceptos)
     conceptos_principales = [concepto for concepto, freq in contador.most_common(5)]
 
     if not conceptos_principales:
-        conceptos_principales = palabras_filtradas[:3]
+        conceptos_principales = [
+            palabra for palabra in palabras_filtradas 
+            if palabra not in palabras_no_concepto
+        ][:3]
 
     return conceptos_principales
 
 def distribuir_unidades_10(unidades):
-    """
-    Distribuye las unidades en 10 sesiones. Si hay menos de 10 unidades,
-    las unidades se dividen en partes para llenar las 10 sesiones,
-    manteniendo el orden original.
-    """
     U = len(unidades)
     if U < 1 or U > 20:
         raise ValueError("U debe estar entre 1 y 20")
@@ -155,22 +153,16 @@ def distribuir_unidades_10(unidades):
         return distribucion[:sesiones_totales]
 
 def genera_dict_unidades(data):
-    """
-    Convierte una lista de tuplas (titulo, contenido) en una lista de diccionarios
-    con el formato {"titulo": ..., "lineas": ..., "n_lineas": ..., "idx": ...}.
-    """
     unidades = []
     for i, (titulo, contenidos) in enumerate(data):
-        # Asegurarse de que contenidos sea una cadena antes de re.split
         if not isinstance(contenidos, str):
-            contenidos = str(contenidos) # Convert to string if it's not
+            contenidos = str(contenidos)
         lineas = [fr.strip() for fr in re.split(r'\.\s*|\n', contenidos) if fr.strip()]
         unidades.append({"titulo": titulo, "lineas": lineas, "n_lineas": len(lineas), "idx": i})
     return unidades
 
 def generar_texto_salida(fecha_inicio, fecha_fin, dia_clase, fechas_prueba,
                            fechas_sesiones, unidades, lista_sesiones_word, feriados_list):
-    """Genera el texto de salida del informe de planificación."""
     out = "\n📋 PLANIFICACIÓN SEMESTRAL\n"
     out += "=" * 90 + "\n"
     out += f"PERÍODO: {fecha_inicio.strftime('%d/%m/%Y')} al {fecha_fin.strftime('%d/%m/%Y')}\n"
@@ -222,7 +214,6 @@ def generar_texto_salida(fecha_inicio, fecha_fin, dia_clase, fechas_prueba,
 
     return out
 
-# --- Configuración de la aplicación Streamlit ---
 st.set_page_config(
     page_title="Planeamiento Semestral - Bloom + Procesamiento Básico",
     page_icon="📚",
@@ -230,7 +221,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Estilo personalizado (opcional, pero hace que se vea más 'chiche')
 st.markdown(
     """
     <style>
@@ -282,7 +272,7 @@ st.markdown(
     .stExpander div[data-baseweb="card"] {
         background-color: #ecf0f1;
     }
-    .css-1r6dm7f { /* This targets the header of the expander */
+    .css-1r6dm7f {
         font-weight: bold;
         color: #2c3e50;
     }
@@ -297,7 +287,6 @@ st.markdown(
 st.title("📚 Planeamiento Semestral Bloom by emSoft")
 st.info("Complete los datos. Todas las fechas se eligen con el calendario. El examen final SIEMPRE es la sesión 17.")
 
-# --- Inicializar estado de sesión ---
 if 'feriados_list' not in st.session_state:
     st.session_state.feriados_list = []
 if 'generated_context' not in st.session_state:
@@ -309,7 +298,6 @@ if 'plantilla_planeamiento_bytes' not in st.session_state:
 if 'plantilla_cronograma_bytes' not in st.session_state:
     st.session_state.plantilla_cronograma_bytes = None
 
-# --- Sección: Parámetros generales ---
 st.header("1. Parámetros Generales")
 cols_general = st.columns(3)
 
@@ -320,18 +308,17 @@ with cols_general[1]:
 with cols_general[2]:
     dia_clase = st.selectbox("Día de la semana:", options=list(dias_semana.keys()), index=0)
 
-# --- Sección: Feriados y Fechas Especiales ---
 st.header("2. Feriados y Fechas Especiales")
 col_feriado_input, col_feriado_btn = st.columns([0.7, 0.3])
 
 with col_feriado_input:
     feriado_date = st.date_input("Agregar feriados:", value=date.today(), key="add_feriado_date", format="DD/MM/YYYY")
 with col_feriado_btn:
-    st.markdown("<br>", unsafe_allow_html=True) # Espaciador para alinear el botón
+    st.markdown("<br>", unsafe_allow_html=True)
     if st.button("➕ Agregar feriado", key="add_feriado_btn"):
         if feriado_date not in st.session_state.feriados_list:
             st.session_state.feriados_list.append(feriado_date)
-            st.session_state.feriados_list.sort() # Mantener ordenado
+            st.session_state.feriados_list.sort()
             st.success(f"Feriado '{feriado_date.strftime('%d/%m/%Y')}' agregado.")
         else:
             st.warning("Ese feriado ya fue agregado.")
@@ -345,7 +332,6 @@ if st.session_state.feriados_list:
     )
     if st.button("➖ Quitar feriado seleccionado", key="remove_feriado_btn", help="Quita el feriado seleccionado de la lista."):
         if feriado_to_remove:
-            # Convertir string de vuelta a date para comparar
             date_obj_to_remove = datetime.strptime(feriado_to_remove, '%d/%m/%Y').date()
             if date_obj_to_remove in st.session_state.feriados_list:
                 st.session_state.feriados_list.remove(date_obj_to_remove)
@@ -367,7 +353,44 @@ with cols_pruebas[1]:
 with cols_pruebas[2]:
     examen_final_date = st.date_input("Fecha Examen Final:", value=date.today() + timedelta(weeks=17), format="DD/MM/YYYY")
 
-# --- Sección: Unidades académicas ---
+# --- AYUDA PEDAGÓGICA (Expander/alerta compatible con cualquier versión) ---
+if "show_ayuda" not in st.session_state:
+    st.session_state.show_ayuda = True
+
+if st.session_state.show_ayuda:
+    with st.expander("🛈 Ayuda para redactar contenidos de unidades pedagógicas", expanded=True):
+        st.markdown("""
+> **IMPORTANTE:**  
+> Para asegurar una planificación clara y efectiva, redacte los contenidos de cada unidad siguiendo estas recomendaciones:
+>
+> - **Sea claro y preciso:** Escriba cada contenido de forma concreta y sin ambigüedades.
+> - **Evite títulos o frases genéricas:** No use palabras como “Generalidades”, “Introducción”, “Unidad 1”, etc. Priorice conceptos específicos y técnicos.
+> - **Un concepto por línea:** Organice cada proceso, tema o idea en líneas independientes para facilitar el análisis y la extracción.
+> - **Utilice términos técnicos y propios del área:** Ejemplo: “Blastulación”, “Segmentación celular”, “Implantación endometrial”.
+> - **Contextualice los contenidos** según el nivel y las necesidades de los estudiantes.
+> - **No repita palabras o conceptos innecesariamente.**  
+> - **Priorice los contenidos relevantes y útiles para el aprendizaje.**
+>
+> **Ejemplo correcto:**
+> ```
+> Ovulación.
+> Fecundación.
+> Segmentación.
+> Blastulación.
+> Implantación.
+> ```
+>
+> **Ejemplo incorrecto:**
+> ```
+> Generalidades.
+> Introducción.
+> Unidad 1.
+> Semana de desarrollo.
+> ```
+""")
+        if st.button("Cerrar ayuda"):
+            st.session_state.show_ayuda = False
+
 st.header("3. Unidades Académicas")
 num_unidades = st.number_input(
     "Número de unidades:",
@@ -378,11 +401,9 @@ num_unidades = st.number_input(
     help="Define la cantidad de unidades académicas a planificar."
 )
 
-# Almacenar los datos de las unidades en el estado de sesión
 if 'unidades_data' not in st.session_state:
     st.session_state.unidades_data = [{'title': f'Unidad {i+1}', 'content': ''} for i in range(num_unidades)]
 elif len(st.session_state.unidades_data) != num_unidades:
-    # Ajustar la lista si el número de unidades cambia
     current_len = len(st.session_state.unidades_data)
     if num_unidades > current_len:
         for i in range(current_len, num_unidades):
@@ -404,7 +425,6 @@ for i in range(num_unidades):
             key=f"unit_content_{i}"
         )
 
-# --- Sección: Plantillas Word ---
 st.header("4. Plantillas Word (.docx)")
 col_plan_upload, col_cron_upload = st.columns(2)
 
@@ -432,7 +452,6 @@ with col_cron_upload:
     elif st.session_state.plantilla_cronograma_bytes is None:
         st.info("Ningún archivo de cronograma seleccionado.")
 
-# --- Botón Generar ---
 st.markdown("<br>", unsafe_allow_html=True) # Espaciador
 if st.button("🚀 Generar Planificación", key="generate_plan_btn"):
     unidades_input = []
@@ -447,14 +466,9 @@ if st.button("🚀 Generar Planificación", key="generate_plan_btn"):
     else:
         with st.spinner("Generando planificación..."):
             try:
-                # Obtener fechas
                 fechas_prueba = [prueba1_date, prueba2_date]
                 examen_final = examen_final_date
-
-                # Generar unidades
                 unidades = genera_dict_unidades(unidades_input)
-
-                # Calcular fechas de sesiones
                 total_sesiones = 17
                 dia_clase_num = dias_semana[dia_clase]
                 fechas_sesiones = []
@@ -465,42 +479,30 @@ if st.button("🚀 Generar Planificación", key="generate_plan_btn"):
                         f += timedelta(days=7)
                     else:
                         f += timedelta(days=1)
-
-                # Validar fechas de pruebas (solo advertencia)
                 for i, pr in enumerate(fechas_prueba):
                     if pr not in fechas_sesiones:
                         st.warning(f"La fecha de Prueba {i+1} ({pr.strftime('%d/%m/%Y')}) no es un día de clase válido o coincide con un feriado.")
                 if examen_final not in fechas_sesiones:
                     st.warning(f"La fecha del Examen Final ({examen_final.strftime('%d/%m/%Y')}) no es un día de clase válido o coincide con un feriado.")
 
-
-                # Configurar tipos de sesiones
                 sesiones = ["Clase normal"] * total_sesiones
                 idx_prueba = []
                 for pr in fechas_prueba:
                     if pr in fechas_sesiones:
                         idx_prueba.append(fechas_sesiones.index(pr))
-
-                # Asegurarse de que el examen final esté en la última sesión y manejar retro/revisión
                 if fechas_sesiones[-1] == examen_final:
                     sesiones[-1] = "Examen final"
                 else:
                     st.warning(f"La fecha de examen final ({examen_final.strftime('%d/%m/%Y')}) no corresponde a la última sesión calculada ({fechas_sesiones[-1].strftime('%d/%m/%Y')}). La última sesión se marcará como Examen Final.")
                     sesiones[-1] = "Examen final"
-
-
                 for i, idx in enumerate(idx_prueba):
-                    if 0 <= idx < total_sesiones: # Asegurarse de que el índice es válido
-                        if idx > 0 and sesiones[idx-1] == "Clase normal": # Evitar sobrescribir si ya es una sesión especial
+                    if 0 <= idx < total_sesiones:
+                        if idx > 0 and sesiones[idx-1] == "Clase normal":
                             sesiones[idx-1] = "Retroalimentación"
                         sesiones[idx] = "Prueba parcial"
-                        if idx < len(sesiones) - 1 and sesiones[idx+1] == "Clase normal": # Evitar sobrescribir
+                        if idx < len(sesiones) - 1 and sesiones[idx+1] == "Clase normal":
                             sesiones[idx+1] = "Revisión de prueba"
-
-                # Distribuir unidades
                 sesiones_unidades = distribuir_unidades_10(unidades)
-
-                # Generar contenido para cada sesión
                 fragmentos_sesiones = []
                 niveles = list(verbos_bloom.keys())
                 nivel_idx = 0
@@ -511,15 +513,12 @@ if st.button("🚀 Generar Planificación", key="generate_plan_btn"):
                     for unidad in lista_unidades:
                         titulos.append(unidad["titulo"])
                         contenido_total.extend(unidad["lineas"])
-
                     fragmento = " ".join(contenido_total)
                     conceptos = extraer_conceptos_simple(fragmento)
                     concepto = ", ".join(conceptos) if conceptos else fragmento[:50] + "..."
-
                     nivel = niveles[nivel_idx % len(niveles)]
                     verbo = random.choice(verbos_bloom[nivel])
                     actividad = plantillas_actividades[nivel].format(concepto)
-
                     fragmentos_sesiones.append({
                         "Unidad": " / ".join(titulos),
                         "Contenido": fragmento,
@@ -532,7 +531,6 @@ if st.button("🚀 Generar Planificación", key="generate_plan_btn"):
                     })
                     nivel_idx += 1
 
-                # Generar lista de sesiones para Word y visualización
                 lista_sesiones_word = []
                 idx_normal = 0
 
@@ -544,7 +542,6 @@ if st.button("🚀 Generar Planificación", key="generate_plan_btn"):
                         "En_feriado": fecha in st.session_state.feriados_list,
                         "Planificacion": None
                     }
-
                     if tipo == "Clase normal":
                         if idx_normal < len(fragmentos_sesiones):
                             p = fragmentos_sesiones[idx_normal]
@@ -564,7 +561,6 @@ if st.button("🚀 Generar Planificación", key="generate_plan_btn"):
                                 "Cierre": random.choice(cierre)
                             }
                         else:
-                            # Fallback if there are more normal classes than unit fragments
                             sesion_dict["Planificacion"] = {
                                 "Unidad": "Sin unidad asignada", "Contenido": "Sin contenido asignado",
                                 "Verbo": "N/A", "Concepto": "N/A", "Nivel": "N/A", "Actividad": "N/A",
@@ -573,8 +569,7 @@ if st.button("🚀 Generar Planificación", key="generate_plan_btn"):
                             }
                         idx_normal += 1
                     else:
-                         # Ensure non-normal sessions also have a placeholder for Planificacion
-                         sesion_dict["Planificacion"] = {
+                        sesion_dict["Planificacion"] = {
                             "Unidad": "", "Contenido": "", "Verbo": "", "Concepto": "",
                             "Nivel": "", "Actividad": "", "Recursos": "", "Evaluacion": "",
                             "Retroalimentacion": "", "Introduccion": "", "Inicio": "", "Desarrollo": "", "Cierre": ""
@@ -582,7 +577,6 @@ if st.button("🚀 Generar Planificación", key="generate_plan_btn"):
 
                     lista_sesiones_word.append(sesion_dict)
 
-                # Crear contexto para Word
                 context = {
                     "PERIODO": f"{fecha_inicio.strftime('%d/%m/%Y')} al {fecha_fin.strftime('%d/%m/%Y')}",
                     "DIA_CLASE": dia_clase.capitalize(),
@@ -592,16 +586,13 @@ if st.button("🚀 Generar Planificación", key="generate_plan_btn"):
                     "UNIDADES": [u["titulo"] for u in unidades],
                 }
 
-                # Agregar datos de cada sesión al contexto
                 for sesion in lista_sesiones_word:
                     pref = f"SESION_{sesion['Numero']}_"
                     context[pref + "FECHA"] = sesion['Fecha']
                     context[pref + "EVENTO"] = sesion['Evento']
                     context[pref + "ADVERTENCIA"] = "⚠️ ¡Advertencia! Esta sesión coincide con un feriado." if sesion["En_feriado"] else ""
-
                     planif = sesion.get("Planificacion")
                     if planif:
-                        # Campos comunes que siempre podrían tener contenido si planif existe
                         context[pref + "UNIDAD"] = f" UNIDAD : {planif['Unidad']}" if planif['Unidad'] else ""
                         context[pref + "CONTENIDO"] = f" CONTENIDO: {planif['Contenido']}" if planif['Contenido'] else ""
                         context[pref + "OBJETIVO"] = f" OBJETIVO: El estudiante será capaz de {planif['Verbo']} {planif['Concepto']}" if planif['Verbo'] and planif['Concepto'] else ""
@@ -611,19 +602,15 @@ if st.button("🚀 Generar Planificación", key="generate_plan_btn"):
                         context[pref + "INICIO"] = f"Inicio: {planif['Inicio']}" if planif['Inicio'] else ""
                         context[pref + "DESARROLLO"] = f"Desarrollo: {planif['Desarrollo']}" if planif['Desarrollo'] else ""
                         context[pref + "CIERRE"] = f"Cierre: {planif['Cierre']}" if planif['Cierre'] else ""
-
-                        # Campos específicos que SOLO deben aparecer para "Clase normal"
                         if sesion["Evento"] == "Clase normal":
                             context[pref + "ESTRATEGIAS"] = f"Estrategias de aprendizaje: {planif['Actividad']}"
                             context[pref + "RECURSOS"] = f"Recursos: {planif['Recursos']}"
                             context[pref + "EVALUACION"] = f"Evaluación: {planif['Evaluacion']}"
                         else:
-                            # Establecer explícitamente como cadena vacía para otros eventos
                             context[pref + "ESTRATEGIAS"] = ""
                             context[pref + "RECURSOS"] = ""
                             context[pref + "EVALUACION"] = ""
                     else:
-                        # Si Planificacion es None (caso de seguridad)
                         campos_with_prefix = [
                             "UNIDAD", "CONTENIDO", "OBJETIVO", "NIVEL_BLOOM", "ESTRATEGIAS",
                             "RETROALIMENTACION", "INTRODUCCION", "INICIO", "DESARROLLO",
@@ -632,11 +619,8 @@ if st.button("🚀 Generar Planificación", key="generate_plan_btn"):
                         for campo in campos_with_prefix:
                             context[pref + campo] = ""
 
-                # Generar texto de salida
                 out = generar_texto_salida(fecha_inicio, fecha_fin, dia_clase, fechas_prueba,
                                            fechas_sesiones, unidades, lista_sesiones_word, st.session_state.feriados_list)
-
-                # Guardar datos en el estado de sesión
                 st.session_state.generated_context = context
                 st.session_state.generated_out_text = out
                 st.success("¡Planificación generada exitosamente! Consulte los resultados a continuación.")
@@ -644,7 +628,6 @@ if st.button("🚀 Generar Planificación", key="generate_plan_btn"):
             except Exception as e:
                 st.error(f"Error al generar la planificación: {str(e)}")
 
-# --- Área de Resultados ---
 st.header("5. Resultados")
 
 if st.session_state.generated_out_text:
@@ -710,4 +693,3 @@ if st.session_state.generated_out_text:
         )
 else:
     st.info("Presione '🚀 Generar Planificación' para ver los resultados y habilitar las descargas.")
-
