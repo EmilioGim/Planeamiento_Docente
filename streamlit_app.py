@@ -13,20 +13,19 @@ from utils import extraer_conceptos_simple, distribuir_unidades_10, genera_dict_
 from data_loaders import load_general_parameters, load_special_dates, load_academic_units
 from planning_logic import generate_planning_data
 from output_generators import generate_text_output, generate_word_documents, setup_streamlit_ui
-from auth import login_screen, logout_button # Importar el nuevo módulo de autenticación
+from auth import login_screen, logout_button # Importar el módulo de autenticación
 
-# Inicializar la interfaz de usuario de Streamlit y el estado de la sesión (estilos y títulos generales)
+# ------- Configuración de estilos y estado global ---------
 setup_streamlit_ui()
 
 # Mostrar botón de cerrar sesión en la barra lateral si el usuario está logueado
 logout_button()
 
 # --- Pantalla de Inicio de Sesión ---
-# Si el usuario no está logueado, mostrar la pantalla de login y detener la ejecución del resto de la app
 if not st.session_state.get('logged_in'):
     login_screen()
 else:
-    # --- Interfaz de la Aplicación Principal (solo si el usuario ha iniciado sesión) ---
+    # Título e info principal SOLO después del login
     st.title("📚 Planeamiento Semestral Bloom by emSoft")
     st.info("Complete los datos. Todas las fechas se eligen con el calendario. El examen final SIEMPRE es la sesión 17.")
 
@@ -63,7 +62,6 @@ else:
                 st.warning("Por favor, seleccione un feriado para quitar.")
     else:
         st.info("No hay feriados agregados aún.")
-
 
     # --- AYUDA PEDAGÓGICA ---
     if "show_ayuda" not in st.session_state:
@@ -111,14 +109,13 @@ else:
     # Solo cargar plantillas desde GitHub si el usuario es premium
     if st.session_state.user_type == 'premium':
         st.header("4. Plantillas Word (.docx)")
-        # generate_word_documents ahora solo carga los bytes en session_state y no devuelve nada
         generate_word_documents()
     else:
         st.info("Las opciones de descarga de documentos Word (Plantillas) están disponibles para usuarios Premium.")
 
+    st.markdown("<br>", unsafe_allow_html=True) # Espaciador visual
 
-    st.markdown("<br>", unsafe_allow_html=True) # Espaciador
-
+    # --- Generar Planificación ---
     if st.button("🚀 Generar Planificación", key="generate_plan_btn"):
         if not unidades_input:
             st.error("Debe ingresar al menos una unidad con título y contenido.")
@@ -162,7 +159,7 @@ else:
             if st.session_state.user_type == 'premium':
                 if st.session_state.plantilla_planeamiento_bytes and st.session_state.generated_context:
                     try:
-                        from docxtpl import DocxTemplate # Importar aquí para uso específico
+                        from docxtpl import DocxTemplate
                         doc_planeamiento = DocxTemplate(io.BytesIO(st.session_state.plantilla_planeamiento_bytes))
                         doc_planeamiento.render(st.session_state.generated_context)
                         bio = io.BytesIO()
@@ -184,13 +181,12 @@ else:
             else:
                 st.info("Descarga de Planeamiento Word solo para usuarios Premium.")
 
-
         with col_download_cron:
             # Solo mostrar botón de descarga de Cronograma Word para usuarios premium
             if st.session_state.user_type == 'premium':
                 if st.session_state.plantilla_cronograma_bytes and st.session_state.generated_context:
                     try:
-                        from docxtpl import DocxTemplate # Importar aquí para uso específico
+                        from docxtpl import DocxTemplate
                         doc_cronograma = DocxTemplate(io.BytesIO(st.session_state.plantilla_cronograma_bytes))
                         doc_cronograma.render(st.session_state.generated_context)
                         bio = io.BytesIO()
@@ -211,7 +207,6 @@ else:
                     st.warning("Las plantillas de Word no se han cargado correctamente. Asegúrese de que las URLs de GitHub sean accesibles o que sea un usuario Premium.")
             else:
                 st.info("Descarga de Cronograma Word solo para usuarios Premium.")
-
 
         with col_download_txt:
             st.download_button(
