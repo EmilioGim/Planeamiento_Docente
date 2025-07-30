@@ -1,15 +1,13 @@
-# output_generators.py
 import streamlit as st
 import io
 import base64
-import requests # Importar la librería requests
+import requests
 
-# Importación condicional de DocxTemplate, ya que no se usa en todas las funciones
 try:
     from docxtpl import DocxTemplate
 except ImportError:
     st.warning("La librería 'python-docx-template' no está instalada. La generación de documentos Word no estará disponible.")
-    DocxTemplate = None # Establecer a None si no está disponible
+    DocxTemplate = None
 
 def setup_streamlit_ui():
     st.set_page_config(
@@ -18,7 +16,6 @@ def setup_streamlit_ui():
         layout="wide",
         initial_sidebar_state="expanded"
     )
-
     st.markdown(
         """
         <style>
@@ -78,10 +75,8 @@ def setup_streamlit_ui():
         unsafe_allow_html=True
     )
 
-    st.title("📚 Planeamiento Semestral Bloom by emSoft")
-    st.info("Complete los datos. Todas las fechas se eligen con el calendario. El examen final SIEMPRE es la sesión 17.")
+    # NO poner aquí st.title() ni st.info()
 
-    # Inicialización de session_state si no existen
     if 'feriados_list' not in st.session_state:
         st.session_state.feriados_list = []
     if 'generated_context' not in st.session_state:
@@ -99,31 +94,24 @@ def generate_text_output(fecha_inicio, fecha_fin, dia_clase, fechas_prueba,
     out += "=" * 90 + "\n"
     out += f"PERÍODO: {fecha_inicio.strftime('%d/%m/%Y')} al {fecha_fin.strftime('%d/%m/%Y')}\n"
     out += f"DÍA DE CLASE: {dia_clase.capitalize()}\n"
-
     if feriados_list:
         out += f"FERIADOS: {', '.join([f.strftime('%d/%m/%Y') for f in feriados_list])}\n"
-
     fechas_validas = [f for f in fechas_prueba if f in fechas_sesiones]
     if fechas_validas:
         out += f"PRUEBAS: {', '.join([f.strftime('%d/%m/%Y') for f in fechas_validas])}\n"
-
     out += f"EXAMEN FINAL: {fechas_sesiones[-1].strftime('%d/%m/%Y')}\n"
     out += "\n" + "-" * 90 + "\n"
     out += "UNIDADES PROGRAMADAS:\n"
-
     for i, unidad in enumerate(unidades, 1):
         out += f"{i}. {unidad['titulo']}\n"
         for contenido in unidad['lineas']:
             out += f"   - {contenido}\n"
         out += "\n"
-
     out += "=" * 90 + "\n"
     out += "\n📅 SESIONES DEL SEMESTRE:\n"
-
     for sesion in lista_sesiones_word:
         out += f"\n🔵 SESIÓN {sesion['Numero']:02d} | {sesion['Fecha']} | {sesion['Evento']}\n"
         out += "-" * 60 + "\n"
-
         if sesion["Evento"] == "Clase normal" and sesion["Planificacion"]:
             p = sesion["Planificacion"]
             out += f"UNIDAD : {p['Unidad']}\n"
@@ -138,41 +126,32 @@ def generate_text_output(fecha_inicio, fecha_fin, dia_clase, fechas_prueba,
             out += f"Cierre: {p['Cierre']}\n"
             out += f"Recursos: {p['Recursos']}\n"
             out += f"Evaluación: {p['Evaluacion']}\n"
-
         if sesion["En_feriado"]:
             out += " ⚠️ ¡Advertencia! Esta sesión coincide con un feriado. Reagendar si es necesario.\n"
-
         out += "-" * 60 + "\n"
-
     return out
 
 def generate_word_documents():
-    # Define las URLs RAW de tus plantillas en GitHub
-    # Asegúrate de que las URLs estén CORRECTAMENTE entre comillas dobles o simples.
-    # Y que sean las URLs RAW (crudas) de los archivos.
     PLAN_TEMPLATE_URL = "https://github.com/EmilioGim/Planeamiento_Docente/raw/refs/heads/main/plantillas/Plantilla_planeamiento.docx"
     CRON_TEMPLATE_URL = "https://github.com/EmilioGim/Planeamiento_Docente/raw/refs/heads/main/plantillas/Plantilla_Cronograma.docx"
 
-    # Eliminado: st.subheader("Cargando Plantillas Word desde GitHub")
+    # Solo descargar si no están ya en session_state
+    if st.session_state.get('plantilla_planeamiento_bytes') is None:
+        try:
+            response_plan = requests.get(PLAN_TEMPLATE_URL)
+            response_plan.raise_for_status()
+            st.session_state.plantilla_planeamiento_bytes = response_plan.content
+        except requests.exceptions.RequestException as e:
+            st.error(f"Error al cargar la plantilla de Planeamiento desde GitHub: {e}. Por favor, verifica la URL.")
+            st.session_state.plantilla_planeamiento_bytes = None
 
-    # Cargar plantilla de Planeamiento
-    try:
-        response_plan = requests.get(PLAN_TEMPLATE_URL)
-        response_plan.raise_for_status() # Lanza un error para códigos de estado HTTP 4xx/5xx
-        st.session_state.plantilla_planeamiento_bytes = response_plan.content
-        # Eliminado: st.success(f"Plantilla de Planeamiento cargada exitosamente desde GitHub.")
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error al cargar la plantilla de Planeamiento desde GitHub: {e}. Por favor, verifica la URL.")
-        st.session_state.plantilla_planeamiento_bytes = None
-
-    # Cargar plantilla de Cronograma
-    try:
-        response_cron = requests.get(CRON_TEMPLATE_URL)
-        response_cron.raise_for_status() # Lanza un error para códigos de estado HTTP 4xx/5xx
-        st.session_state.plantilla_cronograma_bytes = response_cron.content
-        # Eliminado: st.success(f"Plantilla de Cronograma cargada exitosamente desde GitHub.")
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error al cargar la plantilla de Cronograma desde GitHub: {e}. Por favor, verifica la URL.")
-        st.session_state.plantilla_cronograma_bytes = None
+    if st.session_state.get('plantilla_cronograma_bytes') is None:
+        try:
+            response_cron = requests.get(CRON_TEMPLATE_URL)
+            response_cron.raise_for_status()
+            st.session_state.plantilla_cronograma_bytes = response_cron.content
+        except requests.exceptions.RequestException as e:
+            st.error(f"Error al cargar la plantilla de Cronograma desde GitHub: {e}. Por favor, verifica la URL.")
+            st.session_state.plantilla_cronograma_bytes = None
 
     return None, None
