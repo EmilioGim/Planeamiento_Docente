@@ -1,39 +1,8 @@
 # planning_logic.py
-# planning_logic.py
 import streamlit as st
-from datetime import datetime, timedelta, date
+from datetime import timedelta
 import random
-import re
-from collections import Counter
-
-# Asegúrate de importar generate_text_output desde output_generators
 from output_generators import generate_text_output
-from constants import (
-    verbos_bloom, plantillas_actividades, recursos_bloom, evaluacion_bloom,
-    inicio, desarrollo, cierre, intro, retro, dias_semana
-)
-from utils import extraer_conceptos_simple, distribuir_unidades_10, genera_dict_unidades
-
-def generar_titulo_sesion(sesion_info, unidades_dict):
-    """Genera un título descriptivo para la sesión."""
-    evento = sesion_info.get("Evento", "Clase normal")
-    if evento == "Clase normal":
-        planificacion = sesion_info.get("Planificacion", {})
-        unidad_num = planificacion.get("Unidad_Numero")
-        if unidad_num is not None:
-            unidad_titulo = unidades_dict.get(unidad_num, {}).get("titulo", "Unidad Desconocida")
-            concepto = planificacion.get("Concepto", "")
-            return f"Clase: {unidad_titulo} - {concepto}"
-        else:
-            return "Clase normal (sin planificación)"
-    elif evento == "Recuperación de Prueba":
-        return f"Recuperación de Prueba {sesion_info.get('Numero_Prueba', '')}"
-    elif evento == "Examen Final":
-        return "Examen Final"
-    elif evento == "Prueba":
-        return f"Prueba {sesion_info.get('Numero_Prueba', '')}"
-    else:
-        return evento # Para feriados u otros eventos
 
 def generate_planning_data(
     fecha_inicio, fecha_fin, dia_clase, fechas_prueba, examen_final,
@@ -41,131 +10,172 @@ def generate_planning_data(
     verbos_bloom, plantillas_actividades, recursos_bloom, evaluacion_bloom,
     inicio, desarrollo, cierre, intro, retro, extraer_conceptos_simple, distribuir_unidades_10
 ):
-    """
-    Genera el contexto completo para la planificación semestral,
-    incluyendo fechas de sesiones, planificación por sesión y el texto de salida.
-    """
-    # Calcular fechas de sesiones
+    total_sesiones = 17
+    dia_clase_num = dias_semana[dia_clase]
     fechas_sesiones = []
-    current_date = fecha_inicio
-    dia_clase_num = dias_semana[dia_clase.lower()]
-
-    while current_date <= fecha_fin:
-        if current_date.weekday() == dia_clase_num and current_date not in feriados_list:
-            fechas_sesiones.append(current_date)
-        current_date += timedelta(days=1)
-
-    if not fechas_sesiones:
-        raise ValueError("No se encontraron fechas de clase en el período seleccionado. Verifique las fechas y el día de clase.")
-
-    # Asegurarse de que el examen final sea la última sesión
-    # Esto ya debería estar manejado en data_loaders/app.py para la fecha del examen final.
-    # Aquí solo nos aseguramos de que el último elemento de fechas_sesiones sea el examen final
-    # si examen_final ya está en fechas_sesiones.
-    if examen_final not in fechas_sesiones:
-        # Si el examen final no está en las sesiones calculadas (por ser feriado o día incorrecto),
-        # lo insertamos al final o lo reemplazamos si el último día de clase es el mismo.
-        if examen_final.weekday() == dia_clase_num:
-             fechas_sesiones.append(examen_final)
-             fechas_sesiones = sorted(list(set(fechas_sesiones))) # Eliminar duplicados y reordenar
+    f = fecha_inicio
+    while len(fechas_sesiones) < total_sesiones:
+        if f.weekday() == dia_clase_num and f not in feriados_list:
+            fechas_sesiones.append(f)
+            f += timedelta(days=7)
         else:
-            # Si el día de la semana del examen final no coincide con el día de clase,
-            # podríamos ajustarlo o emitir una advertencia. Por ahora, lo añadimos si no existe
-            # o lo dejamos como está si ya se agregó manualmente en app.py.
-            pass # Ya se manejaría la lógica de add_examen_final_to_fechas_sesiones en app.py
+            f += timedelta(days=1)
 
-    # Distribuir unidades en sesiones
-    distribucion_sesiones = distribuir_unidades_10(unidades, len(fechas_sesiones) - 1) # -1 por el examen final
+    for i, pr in enumerate(fechas_prueba):
+        if pr not in fechas_sesiones:
+            st.warning(f"La fecha de Prueba {i+1} ({pr.strftime('%d/%m/%Y')}) no es un día de clase válido o coincide con un feriado.")
+    if examen_final not in fechas_sesiones:
+        st.warning(f"La fecha del Examen Final ({examen_final.strftime('%d/%m/%Y')}) no es un día de clase válido o coincide con un feriado.")
+
+    sesiones_tipos = ["Clase normal"] * total_sesiones
+    idx_prueba = []
+    for pr in fechas_prueba:
+        if pr in fechas_sesiones:
+            idx_prueba.append(fechas_sesiones.index(pr))
+
+    # Asegurar que el examen final siempre sea la última sesión calculada
+    if fechas_sesiones and fechas_sesiones[-1] == examen_final:
+        sesiones_tipos[-1] = "Examen final"
+    else:
+        # Si la fecha del examen final ingresada no coincide con la última sesión calculada,
+        # se fuerza la última sesión calculada a ser el examen final.
+        if fechas_sesiones:
+            st.warning(f"La fecha de examen final ({examen_final.strftime('%d/%m/%Y')}) no corresponde a la última sesión calculada ({fechas_sesiones[-1].strftime('%d/%m/%Y')}). La última sesión se marcará como Examen Final.")
+            sesiones_tipos[-1] = "Examen final"
+        else:
+            st.warning("No se pudieron calcular suficientes sesiones de clase para asignar el Examen Final.")
+
+    for i, idx in enumerate(idx_prueba):
+        if 0 <= idx < total_sesiones:
+            # Sesión previa a la prueba (retroalimentación)
+            if idx > 0 and sesiones_tipos[idx-1] == "Clase normal":
+                sesiones_tipos[idx-1] = "Retroalimentación"
+            # Sesión de la prueba
+            sesiones_tipos[idx] = "Prueba parcial"
+            # Sesión posterior a la prueba (revisión)
+            if idx < len(sesiones_tipos) - 1 and sesiones_tipos[idx+1] == "Clase normal":
+                sesiones_tipos[idx+1] = "Revisión de prueba"
+
+    sesiones_unidades = distribuir_unidades_10(unidades)
+    fragmentos_sesiones = []
+    niveles = list(verbos_bloom.keys())
+    nivel_idx = 0
+
+    for lista_unidades in sesiones_unidades:
+        contenido_total = []
+        titulos = []
+        for unidad in lista_unidades:
+            titulos.append(unidad["titulo"])
+            contenido_total.extend(unidad["lineas"])
+        fragmento = " ".join(contenido_total)
+        conceptos = extraer_conceptos_simple(fragmento)
+        concepto = ", ".join(conceptos) if conceptos else fragmento[:50] + "..." # Fallback if no concepts
+        nivel = niveles[nivel_idx % len(niveles)]
+        verbo = random.choice(verbos_bloom[nivel])
+        actividad = plantillas_actividades[nivel].format(concepto)
+        fragmentos_sesiones.append({
+            "Unidad": " / ".join(titulos),
+            "Contenido": fragmento,
+            "Concepto": concepto,
+            "Nivel": nivel,
+            "Verbo": verbo,
+            "Actividad": actividad,
+            "Recursos": ", ".join(recursos_bloom[nivel]),
+            "Evaluacion": ", ".join(evaluacion_bloom[nivel])
+        })
+        nivel_idx += 1
 
     lista_sesiones_word = []
-    sesion_counter = 0
+    idx_normal = 0
 
-    unidades_dict = {u['numero']: u for u in unidades} # Para fácil acceso por número de unidad
+    for idx, (tipo, fecha) in enumerate(zip(sesiones_tipos, fechas_sesiones)):
+        sesion_dict = {
+            "Numero": idx+1,
+            "Fecha": fecha.strftime("%d/%m/%Y"),
+            "Evento": tipo,
+            "En_feriado": fecha in feriados_list,
+            "Planificacion": None
+        }
+        if tipo == "Clase normal":
+            if idx_normal < len(fragmentos_sesiones):
+                p = fragmentos_sesiones[idx_normal]
+                sesion_dict["Planificacion"] = {
+                    "Unidad": p["Unidad"],
+                    "Contenido": p["Contenido"],
+                    "Verbo": p["Verbo"],
+                    "Concepto": p["Concepto"],
+                    "Nivel": p["Nivel"],
+                    "Actividad": p["Actividad"],
+                    "Recursos": p["Recursos"],
+                    "Evaluacion": p["Evaluacion"],
+                    "Retroalimentacion": random.choice(retro),
+                    "Introduccion": random.choice(intro),
+                    "Inicio": random.choice(inicio),
+                    "Desarrollo": random.choice(desarrollo),
+                    "Cierre": random.choice(cierre)
+                }
+            else:
+                # Fallback for extra "Clase normal" sessions without assigned content
+                sesion_dict["Planificacion"] = {
+                    "Unidad": "Sin unidad asignada", "Contenido": "Sin contenido asignado",
+                    "Verbo": "N/A", "Concepto": "N/A", "Nivel": "N/A", "Actividad": "N/A",
+                    "Recursos": "N/A", "Evaluacion": "N/A", "Retroalimentacion": "N/A",
+                    "Introduccion": "N/A", "Inicio": "N/A", "Desarrollo": "N/A", "Cierre": "N/A"
+                }
+            idx_normal += 1
+        else:
+            # For non-"Clase normal" events, planning details are empty
+            sesion_dict["Planificacion"] = {
+                "Unidad": "", "Contenido": "", "Verbo": "", "Concepto": "",
+                "Nivel": "", "Actividad": "", "Recursos": "", "Evaluacion": "",
+                "Retroalimentacion": "", "Introduccion": "", "Inicio": "", "Desarrollo": "", "Cierre": ""
+            }
 
-    for i, fecha_sesion in enumerate(fechas_sesiones):
-        evento = "Clase normal"
-        planificacion = {}
-        en_feriado = False
-        numero_prueba = None
+        lista_sesiones_word.append(sesion_dict)
 
-        if fecha_sesion in feriados_list:
-            evento = "Feriado"
-            en_feriado = True
-        elif fecha_sesion == examen_final:
-            evento = "Examen Final"
-        elif fecha_sesion in fechas_prueba:
-            evento = "Prueba"
-            numero_prueba = fechas_prueba.index(fecha_sesion) + 1 # Asignar número de prueba
-        elif i < len(distribucion_sesiones): # Para sesiones de clase normal
-            sesion_counter += 1
-            unidad_actual = distribucion_sesiones[i]
-            if unidad_actual:
-                unidad_info = unidades_dict.get(unidad_actual['numero_unidad'])
-                if unidad_info:
-                    contenido_linea = unidad_info['lineas'][unidad_actual['indice_contenido_linea']]
-                    concepto_extraido = extraer_conceptos_simple(contenido_linea)
-
-                    # Seleccionar un verbo de Bloom aleatorio del nivel Aplicar o superior
-                    niveles_aplicables = ["Aplicar", "Analizar", "Evaluar", "Crear"]
-                    nivel_bloom_elegido = random.choice(niveles_aplicables)
-                    verbo_elegido = random.choice(verbos_bloom.get(nivel_bloom_elegido, ["realizar"]))
-
-                    # Seleccionar plantillas aleatorias
-                    actividad_elegida = random.choice(plantillas_actividades.get(nivel_bloom_elegido, ["Actividad general"]))
-                    recurso_elegido = random.choice(recursos_bloom.get(nivel_bloom_elegido, ["Recurso general"]))
-                    evaluacion_elegida = random.choice(evaluacion_bloom.get(nivel_bloom_elegido, ["Evaluación general"]))
-                    inicio_elegido = random.choice(inicio)
-                    desarrollo_elegido = random.choice(desarrollo)
-                    cierre_elegido = random.choice(cierre)
-                    intro_elegida = random.choice(intro)
-                    retro_elegida = random.choice(retro)
-
-                    planificacion = {
-                        "Unidad_Numero": unidad_info['numero'],
-                        "Unidad": unidad_info['titulo'],
-                        "Contenido": contenido_linea,
-                        "Verbo": verbo_elegido,
-                        "Concepto": concepto_extraido,
-                        "Nivel": nivel_bloom_elegido,
-                        "Actividad": actividad_elegida.format(concepto_extraido),
-                        "Retroalimentacion": retro_elegida,
-                        "Introduccion": intro_elegida,
-                        "Inicio": inicio_elegido,
-                        "Desarrollo": desarrollo_elegido,
-                        "Cierre": cierre_elegido,
-                        "Recursos": recurso_elegido,
-                        "Evaluacion": evaluacion_elegida,
-                    }
-                else:
-                    evento = "Clase normal (unidad no encontrada)"
-        elif i == (len(fechas_sesiones) - 1) and evento != "Examen Final": # Ultima sesion si no es el examen
-             evento = "Sesión final de repaso" # O un evento por defecto si no es el examen
-
-        lista_sesiones_word.append({
-            "Numero": i + 1, # Número de sesión basado en el índice
-            "Fecha": fecha_sesion.strftime('%d/%m/%Y'),
-            "Evento": evento,
-            "Planificacion": planificacion,
-            "En_feriado": en_feriado,
-            "Numero_Prueba": numero_prueba
-        })
-
-    # Preparar el contexto para los documentos Word
     context = {
-        "fecha_inicio": fecha_inicio.strftime('%d/%m/%Y'),
-        "fecha_fin": fecha_fin.strftime('%d/%m/%Y'),
-        "dia_clase": dia_clase.capitalize(),
-        "feriados": ", ".join([f.strftime('%d/%m/%Y') for f in feriados_list]) if feriados_list else "Ninguno",
-        "fechas_pruebas": ", ".join([f.strftime('%d/%m/%Y') for f in fechas_prueba if f in fechas_sesiones]) if [f for f in fechas_prueba if f in fechas_sesiones] else "No programadas",
-        "examen_final_fecha": examen_final.strftime('%d/%m/%Y'),
-        "unidades_programadas": [{"Numero": u['numero'], "Titulo": u['titulo']} for u in unidades],
-        "sesiones": lista_sesiones_word
+        "PERIODO": f"{fecha_inicio.strftime('%d/%m/%Y')} al {fecha_fin.strftime('%d/%m/%Y')}",
+        "DIA_CLASE": dia_clase.capitalize(),
+        "FERIADOS": ', '.join([f.strftime('%d/%m/%Y') for f in feriados_list]) if feriados_list else "Ninguno",
+        "PRUEBAS": ', '.join([f.strftime('%d/%m/%Y') for f in fechas_prueba if f in fechas_sesiones]),
+        "EXAMEN_FINAL": fechas_sesiones[-1].strftime('%d/%m/%Y'),
+        "UNIDADES": [u["titulo"] for u in unidades],
     }
 
-    # Generar el texto de salida para la visualización en pantalla
-    # Aquí se llama a generate_text_output con los datos procesados.
-    out_text = generate_text_output(fecha_inicio, fecha_fin, dia_clase,
-                                    fechas_prueba, fechas_sesiones, unidades,
-                                    lista_sesiones_word, feriados_list)
+    for sesion in lista_sesiones_word:
+        pref = f"SESION_{sesion['Numero']}_"
+        context[pref + "FECHA"] = sesion['Fecha']
+        context[pref + "EVENTO"] = sesion['Evento']
+        context[pref + "ADVERTENCIA"] = "⚠️ ¡Advertencia! Esta sesión coincide con un feriado." if sesion["En_feriado"] else ""
+        planif = sesion.get("Planificacion")
+        if planif:
+            context[pref + "UNIDAD"] = f" UNIDAD : {planif['Unidad']}" if planif['Unidad'] else ""
+            context[pref + "CONTENIDO"] = f" CONTENIDO: {planif['Contenido']}" if planif['Contenido'] else ""
+            context[pref + "OBJETIVO"] = f" OBJETIVO: El estudiante será capaz de {planif['Verbo']} {planif['Concepto']}" if planif['Verbo'] and planif['Concepto'] else ""
+            context[pref + "NIVEL_BLOOM"] = f"Nivel Bloom: {planif['Nivel']}" if planif['Nivel'] else ""
+            context[pref + "RETROALIMENTACION"] = f"Retroalimentación: {planif['Retroalimentacion']}" if planif['Retroalimentacion'] else ""
+            context[pref + "INTRODUCCION"] = f"Introducción: {planif['Introduccion']}" if planif['Introduccion'] else ""
+            context[pref + "INICIO"] = f"Inicio: {planif['Inicio']}" if planif['Inicio'] else ""
+            context[pref + "DESARROLLO"] = f"Desarrollo: {planif['Desarrollo']}" if planif['Desarrollo'] else ""
+            context[pref + "CIERRE"] = f"Cierre: {planif['Cierre']}" if planif['Cierre'] else ""
+            if sesion["Evento"] == "Clase normal":
+                context[pref + "ESTRATEGIAS"] = f"Estrategias de aprendizaje: {planif['Actividad']}"
+                context[pref + "RECURSOS"] = f"Recursos: {planif['Recursos']}"
+                context[pref + "EVALUACION"] = f"Evaluación: {planif['Evaluacion']}"
+            else:
+                context[pref + "ESTRATEGIAS"] = ""
+                context[pref + "RECURSOS"] = ""
+                context[pref + "EVALUACION"] = ""
+        else:
+            campos_with_prefix = [
+                "UNIDAD", "CONTENIDO", "OBJETIVO", "NIVEL_BLOOM", "ESTRATEGIAS",
+                "RETROALIMENTACION", "INTRODUCCION", "INICIO", "DESARROLLO",
+                "CIERRE", "RECURSOS", "EVALUACION"
+            ]
+            for campo in campos_with_prefix:
+                context[pref + campo] = ""
+
+    out_text = generate_text_output(fecha_inicio, fecha_fin, dia_clase, fechas_prueba,
+                                   fechas_sesiones, unidades, lista_sesiones_word, feriados_list)
 
     return context, out_text
