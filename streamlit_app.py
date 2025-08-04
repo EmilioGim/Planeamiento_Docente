@@ -275,7 +275,7 @@ def ajustar_unidades_para_sesiones(unidades_originales, total_sesiones_normales=
                 fragmento_frases = frases_unidad[s*por_sesion:(s+1)*por_sesion]
                 
                 if not fragmento_frases:
-                    continue
+                    fragmento_frases = [frases_unidad[-1]] if frases_unidad else [f"Contenido de {bloque_original['titulo']}"]
                 
                 expanded_bloques.append({
                     "titulo": f"{bloque_original['titulo']} (Parte {s+1}/{cantidad_sesiones_para_unidad})" if cantidad_sesiones_para_unidad > 1 else bloque_original['titulo'],
