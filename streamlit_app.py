@@ -64,7 +64,7 @@ def cargar_usuarios():
                 "privilegio": "Estándar"
             },
              "yudith": {
-                "password": "yudithdra01",
+                "password": "yudith01",
                 "privilegio": "Estándar"
     }
         }
@@ -1011,4 +1011,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
