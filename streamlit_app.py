@@ -62,7 +62,11 @@ def cargar_usuarios():
             "docente1": {
                 "password": "doc123",
                 "privilegio": "Estándar"
-            }
+            },
+             "yudith": {
+                "password": "yudithdra01",
+                "privilegio": "Estándar"
+    }
         }
         
         with open(archivo_usuarios, 'w', encoding='utf-8') as f:
@@ -1007,3 +1011,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
